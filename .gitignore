@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.coverage
+mlruns/
+mlflow.db
+reports/junit.xml
+reports/train.log
+.DS_Store

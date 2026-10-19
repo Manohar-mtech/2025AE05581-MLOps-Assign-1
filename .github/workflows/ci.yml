@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lint-test-train:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint (flake8)
+        run: flake8 src api tests scripts
+
+      - name: Unit tests
+        run: |
+          mkdir -p reports
+          pytest --junitxml=reports/junit.xml --cov=src --cov=api --cov-report=term-missing
+
+      - name: EDA figures
+        run: python -m src.eda
+
+      - name: Train and track models
+        run: |
+          set -o pipefail
+          python -m src.train --cv-folds 5 --n-jobs 2 | tee reports/train.log
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports
+          path: |
+            reports/
+            mlruns/
+            models/metadata.json
+      - name: Upload model
+        uses: actions/upload-artifact@v4
+        with:
+          name: model
+          path: models/
+
+  docker:
+    needs: lint-test-train
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: model
+          path: models/
+      - name: Build image
+        run: docker build -t heart-disease-api:ci .
+      - name: Run container
+        run: docker run -d --name api -p 8000:8000 heart-disease-api:ci
+      - name: Smoke test
+        run: scripts/smoke_test.sh http://localhost:8000
+      - name: Container logs
+        if: always()
+        run: docker logs api

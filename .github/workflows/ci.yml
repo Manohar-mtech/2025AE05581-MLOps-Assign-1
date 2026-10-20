@@ -70,3 +70,36 @@ jobs:
       - name: Container logs
         if: always()
         run: docker logs api
+  
+  deploy-k8s:
+    needs: docker
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: model
+          path: models/
+      - name: Build image
+        run: docker build -t heart-disease-api:latest .
+      - name: Create kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: heart
+      - name: Load image into cluster
+        run: kind load docker-image heart-disease-api:latest --name heart
+      - name: Deploy manifests
+        run: |
+          kubectl apply -f k8s/deployment.yaml -f k8s/service.yaml
+          kubectl rollout status deployment/heart-disease-api --timeout=120s
+          kubectl get pods,svc,deployments -o wide
+      - name: Verify endpoints
+        run: |
+          kubectl port-forward svc/heart-disease-api 8080:80 &
+          sleep 5
+          bash scripts/smoke_test.sh http://localhost:8080
+      - name: Debug info on failure
+        if: failure()
+        run: |
+          kubectl describe pods
+          kubectl logs -l app=heart-disease-api --tail=100
